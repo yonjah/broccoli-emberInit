@@ -1,13 +1,13 @@
 {
-  "name": "broccoli-cjsInit",
+  "name": "broccoli-emberInit",
   "version": "1.0.0",
-  "description": "",
+  "description": "Create an es6 loader file for ember app following ember-cli conventions",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "Yoni Jah",
+  "license": "MIT",
   "dependencies": {
     "broccoli-kitchen-sink-helpers": "^0.2.5",
     "broccoli-writer": "^0.1.1",

@@ -54,7 +54,11 @@ EmberInit.prototype.concatenate = function (srcDir, destDir) {
 
 
 	files.forEach(function (file, index) {
-		var name, emberType, emberName;
+		var name, emberType, emberName,
+			moveTo = path.join(destDir, file);
+
+		mkdirp.sync(path.dirname(moveTo));
+		fs.renameSync(path.join(srcDir, file), moveTo);
 		if (file == 'app.js' || file.indexOf('.js') !== (file.length - 3) ) {
 			return;
 		}

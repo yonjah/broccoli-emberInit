@@ -1,11 +1,14 @@
 "use strict";
-var fs        = require('fs'),
-	path      = require('path'),
-	Writer    = require('broccoli-writer'),
-	helpers   = require('broccoli-kitchen-sink-helpers'),
-	mkdirp    = require('mkdirp'),
-	emberTypes = ['template', 'model', 'component', 'controller', 'adapter', 'helper', 'initializer',
-				'mixin', 'route', 'serializer', 'transform', 'util', 'view'];
+var fs         = require('fs'),
+	path       = require('path'),
+	Writer     = require('broccoli-writer'),
+	helpers    = require('broccoli-kitchen-sink-helpers'),
+	mkdirp     = require('mkdirp'),
+	modulesLoc = 'modules',
+	emberTypes = ['hbs_template', 'template', 'model', 'component', 'controller', 'adapter', 'helper', 'initializer',
+				'mixin', 'route', 'serializer', 'transform', 'util', 'view'],
+	typeRegex = new RegExp('(' + emberTypes.map(camelizeStr).join('|')  +')$');
+
 
 
 function EmberInit(inputTree, options) {
@@ -42,63 +45,128 @@ EmberInit.prototype.concatenate = function (srcDir, destDir) {
 			cwd: srcDir,
 			root: srcDir,
 			nomount: false  // absolute paths should be mounted at root
-		}), outputFile     = this.outputFile,
-		outputDir          = path.dirname(outputFile),
-		output             = 'import App from \'app\';\n',
-		helpersOutput      = '',
-		modulesOutput      = 'import Ember from \'ember\';\n',
+		}),
+		outputFile = this.outputFile,
+		outputDir  = path.dirname(outputFile),
+		components = {},
+		output     = {
+			app     : 'import App from \'app\';\n ', //+
+				// 'import Handlebars from \'handlebars\';\n'+
+				// 'Handlebars.TEMPLATES = Handlebars.TEMPLATES || {};\n',
+			helpers : '',
+			modules : 'import Ember from \'ember\';\n'
+		},
 		resolvedOutputFile = path.join(destDir, outputFile);
 
 	mkdirp.sync(path.join(destDir, outputDir));
-	resolvedOutputFile    = path.join(destDir, outputFile);
 
+	resolvedOutputFile = path.join(destDir, outputFile);
 
-	files.forEach(function (file, index) {
-		var name, emberType, emberName,
-			moveTo = path.join(destDir, file);
+	files.filter(moveAndparseModules.bind(this, srcDir, destDir, output))
+		.filter(parseComponents.bind(this, output, components))
+		.filter(parseApp.bind(this, output, components));
 
-		mkdirp.sync(path.dirname(moveTo));
-		fs.renameSync(path.join(srcDir, file), moveTo);
-		if (file == 'app.js' || file.indexOf('.js') !== (file.length - 3) ) {
-			return;
-		}
-		name = file.substring(0, file.length - 3);
-		emberType = getEmberType(name);
-		if (emberType) {
-			emberName = getEmberName(emberType, name);
-			switch (emberType){
-				case 'helper':
-					helpersOutput += genLoadCode(emberName, name, 'Ember');
-					break;
-				case 'template':
-					output += 'import ' + emberName + ' from \'' + name + '\';\n';
-					output += "Ember.TEMPLATES['" + getTemplateName(name) + "'] = " + emberName + ';\n';
-					break;
-				default:
-					output += genLoadCode(emberName, name, 'App');
-			}
-		} else {
-			modulesOutput += 'import \'' + name + '\';\n';
-		}
-	}, this);
+	output.app += 'export default App;';
 
-	output += 'export default App;';
-	fs.writeFileSync(resolvedOutputFile, modulesOutput + helpersOutput + output, {encoding:'utf8'});
+	fs.writeFileSync(resolvedOutputFile, output.modules + output.helpers + output.app, {encoding:'utf8'});
 };
 
-function genLoadCode(name, location, scope) {
-	var res = '';
-	res += 'import ' + name + ' from \'' + location + '\';\n';
-	res += scope + '.' + name + ' = ' + name + ';\n';
-	return res;
+function parseApp (output, components, file) {
+	var name, emberType, emberName;
+	name = file.substring(0, file.length - 3);
+	emberType = getEmberType(name);
+	if (!emberType) { //this should not happen since app files are the last to be parsed
+		throw new Error('not part of ember App ' + file);
+	}
+	emberName = getEmberName(components, emberType, name);
+	switch (emberType){
+		case 'helper':
+			output.helpers += genLoadCode(emberName, name, 'Ember');
+			break;
+		// case 'hbs_template':
+		// 	output.app += 'import ' + emberName + ' from \'' + name + '\';\n';
+		// 	output.app += "Handlebars.TEMPLATES['" + getTemplateName(name) + "'] = " + emberName + ';\n';
+		// 	break;
+		case 'view':
+			output.app += genComponentViewCode(emberName, name, 'App');
+			break;
+		case 'template':
+			output.app += 'import ' + emberName + ' from \'' + name + '\';\n';
+			output.app += "Ember.TEMPLATES['" + getTemplateName(name, emberName) + "'] = " + emberName + ';\n';
+			break;
+		case 'initializer':
+			output.app += 'import ' + emberName + ' from \'' + name + '\';\n';
+			output.app += "Ember.Application.initializer(" + emberName + ");\n";
+			break;
+		default:
+			output.app += genLoadCode(emberName, name, 'App');
+	}
+	return false;
+}
+
+function parseComponents (output, components, file) {
+	var name, emberType, emberName;
+	name = file.substring(0, file.length - 3);
+	emberType = getEmberType(name);
+	if (emberType !== 'component') { //it's not a component pass to next parser
+		return true;
+	}
+	emberName = getEmberName(components, emberType, name);
+	output.app += genLoadCode(emberName, name, 'App');
+	return false;
+}
+
+function moveAndparseModules (srcDir, destDir, output, file) {
+	var name,
+		moveTo = path.join(destDir, file);
+
+	mkdirp.sync(path.dirname(moveTo));
+	fs.renameSync(path.join(srcDir, file), moveTo);
+	if (file == 'app.js' || file.indexOf('.js') !== (file.length - 3) ) {
+		return false;
+	}
+	name = file.substring(0, file.length - 3);
+	if (getEmberType(name)) { //it's not a module pass to next parser
+		return true;
+	}
+	output.modules += 'import \'' + name + '\';\n';
+	return false;
+}
+
+function genComponentViewCode (name, location, scope) {
+	var result = '',
+		parts, last, componentName;
+	if (name.indexOf('Components') !== 0) {
+		return genLoadCode(name, location, scope);
+	}
+
+	parts = location.replace(/-/g,'/').split('/');
+	last  = parts.pop();
+	last  =  camelizeStr(last.replace('View', ''));
+	componentName = camelize(parts.concat('component'));
+	result += 'import ' + name + ' from \'' + location + '\';\n';
+	// result += componentName +'.' + last + ' = ' + name + ';\n';
+	result += componentName +'.reopen({' + last + ' : ' + name + '});\n';
+	return result;
+}
+
+function genLoadCode (name, location, scope) {
+	var result = '';
+	result += 'import ' + name + ' from \'' + location + '\';\n';
+	result += scope + '.' + name + ' = ' + name + ';\n';
+	return result;
 }
 
 function getEmberType (name) {
 	var parts = name.split('/'),
 		first = parts[0],
 		last  = parts[parts.length -1],
+		match,
 		index = -1;
 
+	if (parts[0] === modulesLoc) { // exclude all modules from having a type
+		return;
+	}
 	if (first[first.length - 1] === 's') {
 		index = emberTypes.indexOf(first.substring(0, first.length - 1));
 	}
@@ -110,41 +178,79 @@ function getEmberType (name) {
 	if (index >= 0) {
 		return emberTypes[index];
 	}
+
+	match = typeRegex.exec(last);
+	return match && match[0].toLowerCase();
 }
 
-function getEmberName (type, name) {
-	var parts = name.replace('-','/').split('/'),
-		last  = parts[parts.length -1];
+function getEmberName (components, type, name) {
+	var parts = name.replace(/-/g,'/').split('/'),
+		first = parts[0],
+		last  = parts.pop(),
+		result  = '';
 
-	if (last === type) {
-		parts.pop();
-	} else {
+	if (	first === type ||
+				(first[first.length - 1] === 's' &&
+				emberTypes.indexOf(first.substring(0, first.length - 1)) >= 0)
+			) {
 		parts.shift();
+		parts.push(last);
+		last = type;
 	}
 	// 'template', 'model', 'component', 'controller', 'adapter', 'helper',
 	// 'initializer', 'mixin', 'route', 'serializer', 'transform', 'util', 'view'
+	result = camelize(parts);
+	if (components[result]) {
+		result = 'Components' + result;
+	}
+
 	switch (type){
 		case 'model':
-			return camelize(parts);
+			break;
+		case 'component':
+			components[result] = true;
+			/* falls through*/
 		default:
-			return camelize(parts.concat(type));
+			result += camelizeStr(last);
 	}
+	return result;
 }
 
-function getTemplateName(name) {
-	var parts = name.split('/');
-	if (parts[0] === 'templates') {
+function getTemplateName(name, emberName) {
+	var parts = name.split('/'),
+		res   = '',
+		last;
+
+	if (parts[0] === 'templates' || parts[0] === 'hbs_templates') {
 		parts.shift();
 	} else {
-		parts.pop();
+		last = parts.pop();
 	}
-	return parts.join('/');
+
+	if (parts[0] !== 'components' && emberName.indexOf('Components') === 0) {
+		res = 'components/' + parts.join('-');
+		if (last.indexOf('Template') + 8 === last.length) {
+			res += (res ? '/' :'') + last.replace('Template', '');
+		} else if (last !== 'template') {
+			res += (res ? '/' :'') + last;
+		}
+	}
+
+	if (!res) {
+		res = parts.join('/');
+	}
+
+
+	console.log(res, name, parts, emberName);
+	return res;
 }
 
 function camelize (arr) {
-	return arr.reduce(function (res, str) {
-		return res + str[0].toUpperCase() + str.substring(1);
-	}, '');
+	return arr.map(camelizeStr).join('');
+}
+
+function camelizeStr (str) {
+	return str[0].toUpperCase() + str.substring(1);
 }
 
 module.exports = EmberInit;

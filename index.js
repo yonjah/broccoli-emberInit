@@ -239,9 +239,6 @@ function getTemplateName(name, emberName) {
 	if (!res) {
 		res = parts.join('/');
 	}
-
-
-	console.log(res, name, parts, emberName);
 	return res;
 }
 

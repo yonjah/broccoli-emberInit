@@ -219,25 +219,28 @@ function getEmberName (components, type, name) {
 function getTemplateName(name, emberName) {
 	var parts = name.split('/'),
 		res   = '',
-		last;
+		last  = '';
 
 	if (parts[0] === 'templates' || parts[0] === 'hbs_templates') {
 		parts.shift();
 	} else {
 		last = parts.pop();
+		if (last === 'template') {
+			last = '';
+		}
 	}
 
 	if (parts[0] !== 'components' && emberName.indexOf('Components') === 0) {
 		res = 'components/' + parts.join('-');
-		if (last.indexOf('Template') + 8 === last.length) {
-			res += (res ? '/' :'') + last.replace('Template', '');
-		} else if (last !== 'template') {
-			res += (res ? '/' :'') + last;
-		}
 	}
-
 	if (!res) {
 		res = parts.join('/');
+	}
+
+	if (last.indexOf('Template') + 8 === last.length) {
+		res += (res ? '/' :'') + last.replace('Template', '');
+	} else if (last) {
+		res += (res ? '/' :'') + last;
 	}
 	return res;
 }

@@ -204,6 +204,11 @@ function getEmberName (components, type, name) {
 		result = 'Components' + result;
 	}
 
+	if (typeRegex.exec(last)) {
+		result += camelizeStr(last.replace(typeRegex, ''));
+		last = type;
+	}
+
 	switch (type){
 		case 'model':
 			break;

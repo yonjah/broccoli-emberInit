@@ -1,6 +1,6 @@
 {
   "name": "broccoli-emberInit",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Create an es6 loader file for ember app following ember-cli conventions",
   "main": "index.js",
   "scripts": {
@@ -9,8 +9,7 @@
   "author": "Yoni Jah",
   "license": "MIT",
   "dependencies": {
-    "broccoli-kitchen-sink-helpers": "^0.2.5",
-    "broccoli-writer": "^0.1.1",
+    "broccoli-caching-writer": "^2.2.0",
     "mkdirp": "^0.5.0"
   }
 }

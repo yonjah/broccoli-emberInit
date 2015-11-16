@@ -1,53 +1,46 @@
 "use strict";
 var fs         = require('fs'),
 	path       = require('path'),
-	Writer     = require('broccoli-writer'),
-	helpers    = require('broccoli-kitchen-sink-helpers'),
+	CachingWriter = require('broccoli-caching-writer'),
 	mkdirp     = require('mkdirp'),
 	modulesLoc = 'modules',
 	emberTypes = ['hbs_template', 'template', 'model', 'component', 'controller', 'adapter', 'helper', 'initializer',
 				'mixin', 'route', 'serializer', 'transform', 'util', 'view'],
 	typeRegex = new RegExp('(' + emberTypes.map(camelizeStr).join('|')  +')$');
 
-
+module.exports = EmberInit;
+EmberInit.prototype = Object.create(CachingWriter.prototype);
+EmberInit.prototype.constructor = EmberInit;
 
 function EmberInit(inputTree, options) {
-	if (!(this instanceof EmberInit)) return new EmberInit(inputTree, options);
+	if (!(this instanceof EmberInit)) {
+		return new EmberInit(inputTree, options);
+	}
 	options = options || {};
+	if (!options.outputFile) throw new Error('option outputFile is required');
+
+	options.inputFiles = options.inputFiles || ['**/*.js'];
 	this.inputTree = inputTree;
-
-	this.files = options.files || ['**/*.js'];
-
+	CachingWriter.call(this, [inputTree], {
+		inputFiles: options.inputFiles,
+		annotation: options.annotation
+	});
+	this.inputFiles = options.inputFiles;
 	this.outputFile = options.outputFile;
-	if (!this.outputFile) throw new Error('option outputFile is required');
 
 	this.sourceMapFile = options.sourceMapFile || this.outputFile.replace(/\.js$/, '.map');
 
 	this.sourcesContent = options.sourcesContent;
-
-// helpers.assertAbsolutePaths([this.outputFile, this.sourceMapFile]);
 }
-EmberInit.prototype = Object.create(Writer.prototype);
-EmberInit.prototype.constructor = EmberInit;
 
-EmberInit.prototype.write = function (readTree, destDir) {
-	var concatenate = function (srcDir) {
-		return this.concatenate(srcDir, destDir);
-	}.bind(this);
-	return readTree(this.inputTree).then(concatenate);
-};
 
-// the sourceMappingURL is the sourceMapFile relative from the outputFile
-// the "file" is the outputFile relative from the sourceMapFile
-// the sources in the source map are relative from sourceMapFile
-EmberInit.prototype.concatenate = function (srcDir, destDir) {
-	var files = helpers.multiGlob(this.files, {
-			cwd: srcDir,
-			root: srcDir,
-			nomount: false  // absolute paths should be mounted at root
-		}),
-		outputFile = this.outputFile,
-		outputDir  = path.dirname(outputFile),
+EmberInit.prototype.build = function () {
+	var files = this.listFiles().filter(function(file){
+			return !isDirectory(file);
+		}, this),
+		outputPath   = this.outputPath,
+		outputFile   = this.outputFile,
+		inputPath    = this.inputPaths[0] + '/',
 		components = {},
 		output     = {
 			app     : 'import App from \'app\';\n ', //+
@@ -56,13 +49,14 @@ EmberInit.prototype.concatenate = function (srcDir, destDir) {
 			helpers : '',
 			modules : 'import Ember from \'ember\';\n'
 		},
-		resolvedOutputFile = path.join(destDir, outputFile);
+		resolvedOutputFile = path.join(outputPath, outputFile);
 
-	mkdirp.sync(path.join(destDir, outputDir));
+	mkdirp.sync(outputPath);
 
-	resolvedOutputFile = path.join(destDir, outputFile);
-
-	files.filter(moveAndparseModules.bind(this, srcDir, destDir, output))
+	files.map(function (file) {
+			return file.replace(inputPath, '');
+		})
+		.filter(moveAndparseModules.bind(this, inputPath, outputPath, output))
 		.filter(parseComponents.bind(this, output, components))
 		.filter(parseApp.bind(this, output, components));
 
@@ -121,7 +115,7 @@ function moveAndparseModules (srcDir, destDir, output, file) {
 		moveTo = path.join(destDir, file);
 
 	mkdirp.sync(path.dirname(moveTo));
-	fs.renameSync(path.join(srcDir, file), moveTo);
+	fs.writeFileSync(moveTo, fs.readFileSync(path.join(srcDir, file)));
 	if (file == 'app.js' || file.indexOf('.js') !== (file.length - 3) ) {
 		return false;
 	}
@@ -257,5 +251,13 @@ function camelize (arr) {
 function camelizeStr (str) {
 	return str[0].toUpperCase() + str.substring(1);
 }
+
+function isDirectory(fullPath) {
+  // files returned from listFiles are directories if they end in /
+  // see: https://github.com/joliss/node-walk-sync
+  // "Note that directories come before their contents, and have a trailing slash"
+  return fullPath.charAt(fullPath.length - 1) === '/';
+}
+
 
 module.exports = EmberInit;
